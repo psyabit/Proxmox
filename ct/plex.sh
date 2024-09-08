@@ -24,6 +24,10 @@ var_cpu="2"
 var_ram="2048"
 var_os="ubuntu"
 var_version="22.04"
+nfs_server="192.168.1.250"  # Hier IP deines NFS-Servers anpassen
+nfs_share="/nfs/tank/media"      # Hier den Pfad zum NFS-Share anpassen
+nfs_mount_point="/mnt/media"  # Ziel-Verzeichnis im Container
+container_id="903"          # Hier die ID des Containers anpassen
 variables
 color
 catch_errors
@@ -38,7 +42,7 @@ function default_settings() {
   RAM_SIZE="$var_ram"
   BRG="vmbr0"
   NET="dhcp"
-  GATE=""
+  GATE="192.168.1.1"
   APT_CACHER=""
   APT_CACHER_IP=""
   DISABLEIP6="no"
@@ -74,8 +78,34 @@ exit
 fi
 }
 
+function enable_nfs_for_lxc() {
+  # NFS für den LXC-Container aktivieren
+  msg_info "Enabling NFS support for LXC container"
+
+  # AppArmor-Profil kopieren und anpassen
+  cp -i /etc/apparmor.d/lxc/lxc-default-cgns /etc/apparmor.d/lxc/lxc-default-with-nfs
+  sed -i 's/profile lxc-container-default-cgns/profile lxc-container-default-with-nfs/' /etc/apparmor.d/lxc/lxc-default-with-nfs
+
+  # NFS-Konfiguration zum AppArmor-Profil hinzufügen
+  echo -e "\n  mount fstype=nfs,\n  mount fstype=nfs4,\n  mount fstype=nfsd,\n  mount fstype=rpc_pipefs,\n}" >> /etc/apparmor.d/lxc/lxc-default-with-nfs
+
+  # AppArmor neu laden
+  systemctl reload apparmor
+  msg_ok "NFS configuration applied to AppArmor"
+
+  # Profil im LXC-Container konfigurieren
+  echo "lxc.apparmor.profile: lxc-container-default-with-nfs" >> /etc/pve/lxc/${container_id}.conf
+
+  # Container neu starten
+  pct stop ${container_id} && pct start ${container_id}
+  msg_ok "NFS enabled for LXC container ${container_id}"
+}
+
+
 start
 build_container
+enable_nfs_for_lxc
+setup_fstab_mount_in_lxc
 description
 
 msg_ok "Completed Successfully!\n"
